@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: bash -n
+        run: bash -n bootstrap.sh
+      - name: shellcheck
+        run: shellcheck bootstrap.sh tests/helpers/fakes.bash
+
+  test:
+    # The macOS run is the one that matters most: a new Mac ships with bash
+    # 3.2, and the wizard has to work there.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: install bats
+        run: |
+          if command -v brew >/dev/null 2>&1; then
+            brew install bats-core
+          else
+            sudo apt-get update
+            sudo apt-get install -y bats
+          fi
+      - name: bats
+        run: bats tests
+      - name: syntax under the bash a new Mac ships (3.2)
+        if: runner.os == 'macOS'
+        run: |
+          /bin/bash --version | head -1
+          /bin/bash -n bootstrap.sh
