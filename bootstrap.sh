@@ -183,13 +183,21 @@ finish() {
 # STAGES: the pre-bootstrap. Everything a factory-fresh Mac needs before the
 # configuration repository exists on disk and can take over.
 #
-# Every phase is guarded: it checks whether its effect is already present and
+# Every step is guarded: it checks whether its effect is already present and
 # skips if so, which is what makes a re-run after an interrupted attempt cost
 # seconds rather than starting over. Resumability is by guard, never by state
-# file: a state file lies the moment something is fixed by hand.
+# file: a state file lies the moment something is fixed by hand outside the
+# run.
+#
+# A step is a unit of work inside a phase; a phase is one of the two halves of
+# the bootstrap, and this file is the first of them. The library above counts
+# in stages and the private configuration's CONTEXT.md rules that word out, so
+# nothing below here uses it: TOTAL_STEPS, heading() and step() replace the
+# library's TOTAL_STAGES and stage(), which go unused like several of its
+# other helpers.
 # ──────────────────────────────────────────────────────────────────────────
 
-TOTAL_STAGES=10
+TOTAL_STEPS=10
 
 # The library sets -euo pipefail. Add errtrace on top: without it the ERR trap
 # below is not inherited by functions, and every action here is a function, so
@@ -197,9 +205,9 @@ TOTAL_STAGES=10
 set -E
 
 # ── Configuration ─────────────────────────────────────────────────────────
-# Each of these is a seam: where this wizard reaches the machine. Overriding
-# one points the wizard at somewhere else, which is how the tests describe a
-# machine without owning one.
+# Each of these is a seam: where this pre-bootstrap reaches the machine.
+# Overriding one points it at somewhere else, which is how the tests describe
+# a machine without owning one.
 
 NIXPKGS_FLAKE="${NIXPKGS_FLAKE:-github:NixOS/nixpkgs/nixpkgs-unstable}"
 NIX_INSTALLER_URL="${NIX_INSTALLER_URL:-https://nixos.org/nix/install}"
@@ -209,17 +217,18 @@ CLT_RECEIPT="com.apple.pkg.CLTools_Executables"
 ROSETTA_RECEIPT="com.apple.pkg.RosettaUpdateAuto"
 CLT_TIMEOUT="${CLT_TIMEOUT:-1800}"
 
-# The file the cloned repository must provide for this wizard to hand over to.
+# The file the cloned repository must provide to be handed over to.
 HANDOFF="bootstrap.sh"
 
 DRY_RUN=0
 SLUG=""
 DEST=""
-PHASE_N=0
-CURRENT_PHASE="startup"
+STEP_N=0
+CURRENT_STEP="startup"
 SUDO_PRIMED=0
 
-# A guard that wants to explain itself sets SKIP_REASON, which phase() reads
+# A guard that wants to explain itself sets SKIP_REASON, which run_step()
+# reads
 # once and clears. Only the guards with something to add beyond "already done"
 # bother: Rosetta on Intel, and Nix already on PATH.
 SKIP_REASON=""
@@ -233,8 +242,8 @@ work-mac-bootstrap — take a factory-fresh Mac to a cloned configuration.
   bootstrap.sh [options] [owner/repo]
 
   owner/repo    the configuration repository to clone and hand over to.
-                This wizard knows nothing else about it, and it is the only
-                argument the wizard takes. Leave it out and the wizard lists
+                This pre-bootstrap knows nothing else about it, and it
+                is the only argument it takes. Leave it out and it lists
                 your repositories after you sign in, and asks which one.
 
 Options:
@@ -297,7 +306,7 @@ gh_cli() {
 # can_ask_gh says whether this run may consult gh at all. A dry run downloads
 # nothing and makes nobody wait, so it will use a gh that is already here but
 # will not fetch one: where it cannot ask, the guard reads as unmet and the
-# phase is reported as needed, which is the honest answer.
+# step is reported as needed, which is the honest answer.
 can_ask_gh() {
   if have gh; then return 0; fi
   if (( DRY_RUN )); then return 1; fi
@@ -306,7 +315,7 @@ can_ask_gh() {
 
 # ensure_sudo asks for the password once, up front, rather than letting an
 # installer surprise you with a prompt halfway through a download. The two
-# phases that need root run back to back, and each sudo call refreshes the
+# steps that need root run back to back, and each sudo call refreshes the
 # grant, so one prompt covers both.
 ensure_sudo() {
   if (( SUDO_PRIMED )); then return 0; fi
@@ -318,7 +327,7 @@ ensure_sudo() {
 
 on_error() {
   local code=$?
-  printf '\n  %s✗ %s failed (exit %s)%s\n' "$RED" "$CURRENT_PHASE" "$code" "$RESET" >&2
+  printf '\n  %s✗ %s failed (exit %s)%s\n' "$RED" "$CURRENT_STEP" "$code" "$RESET" >&2
   printf '  %sEvery step checks whether it is already done, so running the same\n' "$DIM" >&2
   printf '  command again is safe and picks up where this one stopped.%s\n\n' "$RESET" >&2
   exit "$code"
@@ -350,7 +359,7 @@ if [[ -n "$SLUG" ]] && ! is_repository "$SLUG"; then
 fi
 
 if [[ "$(uname -s)" != Darwin ]]; then
-  die "this wizard only runs on macOS"
+  die "this pre-bootstrap only runs on macOS"
 fi
 
 if [[ -n "$SLUG" ]]; then
@@ -365,20 +374,29 @@ if (( ! DRY_RUN )) && [[ ! -t 0 ]] && ( exec < /dev/tty ) 2>/dev/null; then
   exec < /dev/tty
 fi
 
-# ── Announcing a phase ────────────────────────────────────────────────────
+# ── Announcing a step ─────────────────────────────────────────────────────
 
-# announce renders one phase. In dry-run it prints a plan line: the phase
+# heading renders one step's frame in a real run, in place of the library's
+# stage(), which counts the same things in a word this project does not use.
+# Clearing keeps only the current step on screen.
+heading() {
+  _clear
+  printf '\n%s%s▸ Step %s/%s · %s%s\n' \
+    "$BOLD" "$BLUE" "$STEP_N" "$TOTAL_STEPS" "$1" "$RESET"
+}
+
+# announce renders one step. In dry-run it prints a plan line: the step
 # identifier, whether it would run, the guard that decided, and what it would
-# do. In a real run it opens a stage instead. The dry-run form is the contract
-# the tests assert on, so keep it stable.
+# do. In a real run it opens a heading instead. The dry-run form is the
+# contract the tests assert on, so keep it stable.
 announce() {
   local id="$1" title="$2" status="$3" guard_text="$4" detail="$5"
   if (( DRY_RUN )); then
-    printf '  [%2d] %-19s %s\n' "$PHASE_N" "$id" "$status"
+    printf '  [%2d] %-19s %s\n' "$STEP_N" "$id" "$status"
     printf '        guard: %s\n' "$guard_text"
     printf '        %s\n\n' "$detail"
   else
-    stage "$title"
+    heading "$title"
     if [[ "$status" == SKIP ]]; then
       printf '  %s✓ %s%s\n' "$GREEN" "$detail" "$RESET"
     else
@@ -389,13 +407,17 @@ announce() {
   fi
 }
 
-# phase ID TITLE GUARD_TEXT DETAIL GUARD_FN ACTION_FN evaluates the guard,
+# run_step ID TITLE GUARD_TEXT DETAIL GUARD_FN ACTION_FN evaluates the guard,
 # announces the outcome, and runs the action only when the guard is unmet and
 # this is not a dry run. Guards read the machine and change nothing, so
 # evaluating them during a dry run is safe.
-phase() {
+#
+# run_step rather than step: the library already has a step(), which prints a
+# bullet for a browser action. Shadowing it would make it provably dead, which
+# SC2329 fails the lint over, and the library is not ours to edit.
+run_step() {
   local id="$1" title="$2" guard_text="$3" detail="$4" guard_fn="$5" action_fn="$6"
-  PHASE_N=$((PHASE_N + 1))
+  STEP_N=$((STEP_N + 1))
   SKIP_REASON=""
   if "$guard_fn"; then
     announce "$id" "$title" SKIP "$guard_text" "${SKIP_REASON:-already done}"
@@ -403,7 +425,7 @@ phase() {
   fi
   announce "$id" "$title" RUN "$guard_text" "$detail"
   if (( DRY_RUN )); then return 0; fi
-  CURRENT_PHASE="$title"
+  CURRENT_STEP="$title"
   "$action_fn"
 }
 
@@ -464,7 +486,7 @@ guard_clone() {
   [[ -n "$DEST" && -d "$DEST/.git" ]]
 }
 
-# The handoff is the point of the wizard, so it never reports as done.
+# The handoff is the point of the pre-bootstrap, so it never reports as done.
 guard_handoff() { return 1; }
 
 # ── Actions ───────────────────────────────────────────────────────────────
@@ -624,62 +646,63 @@ if (( DRY_RUN )); then
     "$DIM" "$(destination_display)" "$HANDOFF" "$RESET"
 else
   # The library's banner() describes a wizard that captures values you copy out
-  # of a browser. This one installs things, so it says so in its own words.
+  # of a browser. This one installs things, so it says so in its own words, and
+  # counts in steps rather than the library's stages.
   _clear
   printf '\n%s%s  work-mac-bootstrap%s\n' "$BOLD" "$BLUE" "$RESET"
-  printf '%s  %s stages, taking this Mac to a clone of %s%s\n\n' \
-    "$DIM" "$TOTAL_STAGES" "${SLUG:-a configuration you choose}" "$RESET"
+  printf '%s  %s steps, taking this Mac to a clone of %s%s\n\n' \
+    "$DIM" "$TOTAL_STEPS" "${SLUG:-a configuration you choose}" "$RESET"
   printf '%s  Steps already done are skipped, and stopping with Ctrl-C costs you\n' "$DIM"
   printf '  nothing: run the same command again to pick up where you left off.%s\n\n' "$RESET"
   pause "Ready to start?"
 fi
 
-phase command-line-tools "Command Line Tools" \
+run_step command-line-tools "Command Line Tools" \
   "xcode-select -p, and pkgutil --pkg-info=$CLT_RECEIPT" \
   "xcode-select --install, then poll for the package receipt until it lands" \
   guard_command_line_tools do_command_line_tools
 
-phase rosetta "Rosetta 2" \
+run_step rosetta "Rosetta 2" \
   "pkgutil --pkg-info=$ROSETTA_RECEIPT on Apple Silicon" \
   "softwareupdate --install-rosetta, accepting the licence" \
   guard_rosetta do_rosetta
 
-phase nix "Nix" \
+run_step nix "Nix" \
   "nix on PATH, or $NIX_DAEMON_PROFILE" \
   "install Nix from $NIX_INSTALLER_URL in daemon mode, unattended" \
   guard_nix do_nix
 
-phase nix-profile "Nix in this shell" \
+run_step nix-profile "Nix in this shell" \
   "nix on PATH" \
   "source the daemon profile, so this run gains nix without a new terminal" \
   guard_nix_profile do_nix_profile
 
-phase github-auth "GitHub sign-in" \
+run_step github-auth "GitHub sign-in" \
   "gh auth status" \
   "sign in to GitHub in the browser with a one-time code" \
   guard_github_auth do_github_auth
 
-phase git-credentials "Git credential helper" \
+run_step git-credentials "Git credential helper" \
   "git config --global credential.https://github.com.helper" \
   "point git at that sign-in, so pushing from this Mac needs nothing further" \
   guard_git_credentials do_git_credentials
 
-phase ssh-key "SSH key" \
+run_step ssh-key "SSH key" \
   "$SSH_KEY registered in gh ssh-key list" \
   "generate an ed25519 key and register it with GitHub" \
   guard_ssh_key do_ssh_key
 
-phase choose-repository "Choose the configuration" \
+run_step choose-repository "Choose the configuration" \
   "a repository named on the command line" \
   "list the repositories on your GitHub account and ask which one to clone" \
   guard_choose_repository do_choose_repository
 
-phase clone "Clone the configuration" \
+run_step clone "Clone the configuration" \
   "$(destination_display)/.git" \
   "clone ${SLUG:-the repository you chose} into $(destination_display)" \
   guard_clone do_clone
 
-phase handoff "Hand over to the configuration" \
+run_step handoff "Hand over to the configuration" \
   "never skipped" \
   "$(handoff_detail)" \
   guard_handoff do_handoff

@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 #
 # The dry-run plan is the contract this repository is tested against: what the
-# wizard will do, in what order, and which guard decides whether each phase is
+# pre-bootstrap will do, in what order, and which guard decides whether each step is
 # needed. These tests assert on that plan. Nothing here runs an installer.
 
 load helpers/fakes
@@ -41,7 +41,7 @@ setup() {
 
 # ── Plan shape ────────────────────────────────────────────────────────────
 
-@test "the plan lists every phase in dependency order" {
+@test "the plan lists every step in dependency order" {
   plan owner/repo
   [ "$status" -eq 0 ]
   [ "$(plan_ids)" = "command-line-tools
@@ -79,7 +79,7 @@ handoff" ]
   [ "$status" -ne 0 ]
 }
 
-@test "every phase states the guard that decides whether it runs" {
+@test "every step states the guard that decides whether it runs" {
   plan owner/repo
   local guards
   guards=$(printf '%s\n' "$output" | grep -c 'guard:')
@@ -88,19 +88,19 @@ handoff" ]
 
 # ── Guards: a factory-fresh machine ───────────────────────────────────────
 
-@test "on a fresh machine every phase runs" {
+@test "on a fresh machine every step runs" {
   plan owner/repo
-  [ "$(phase_status command-line-tools)" = RUN ]
-  [ "$(phase_status rosetta)" = RUN ]
-  [ "$(phase_status nix)" = RUN ]
-  [ "$(phase_status nix-profile)" = RUN ]
-  [ "$(phase_status github-auth)" = RUN ]
-  [ "$(phase_status git-credentials)" = RUN ]
-  [ "$(phase_status ssh-key)" = RUN ]
-  [ "$(phase_status clone)" = RUN ]
-  [ "$(phase_status handoff)" = RUN ]
+  [ "$(step_status command-line-tools)" = RUN ]
+  [ "$(step_status rosetta)" = RUN ]
+  [ "$(step_status nix)" = RUN ]
+  [ "$(step_status nix-profile)" = RUN ]
+  [ "$(step_status github-auth)" = RUN ]
+  [ "$(step_status git-credentials)" = RUN ]
+  [ "$(step_status ssh-key)" = RUN ]
+  [ "$(step_status clone)" = RUN ]
+  [ "$(step_status handoff)" = RUN ]
   # The exception: a slug was given, so there is nothing to choose.
-  [ "$(phase_status choose-repository)" = SKIP ]
+  [ "$(step_status choose-repository)" = SKIP ]
 }
 
 @test "a fresh machine is told the Command Line Tools dialog needs a click" {
@@ -109,7 +109,7 @@ handoff" ]
   [[ "$output" == *"receipt"* ]]
 }
 
-@test "the GitHub phase promises a browser sign-in and no access token" {
+@test "the GitHub step promises a browser sign-in and no access token" {
   plan owner/repo
   [[ "$output" == *"browser"* ]]
   [[ "$output" == *"one-time code"* ]]
@@ -126,48 +126,48 @@ handoff" ]
 
 # ── Guards: a machine that is partly or wholly set up ─────────────────────
 
-@test "the Command Line Tools phase is skipped once the receipt is present" {
+@test "the Command Line Tools step is skipped once the receipt is present" {
   clt_installed
   plan owner/repo
-  [ "$(phase_status command-line-tools)" = SKIP ]
+  [ "$(step_status command-line-tools)" = SKIP ]
 }
 
 @test "Rosetta is skipped on Intel hardware" {
   fake uname 'case "${1:-}" in -m) echo x86_64 ;; *) echo Darwin ;; esac'
   plan owner/repo
-  [ "$(phase_status rosetta)" = SKIP ]
+  [ "$(step_status rosetta)" = SKIP ]
   [[ "$output" == *"Apple Silicon"* ]]
 }
 
 @test "Rosetta is skipped once its receipt is present" {
   fake pkgutil 'case "${1:-}" in *Rosetta*) exit 0 ;; *) exit 1 ;; esac'
   plan owner/repo
-  [ "$(phase_status rosetta)" = SKIP ]
+  [ "$(step_status rosetta)" = SKIP ]
 }
 
 @test "the Nix install is skipped once the daemon profile exists" {
   fake_nix_present
   plan owner/repo
-  [ "$(phase_status nix)" = SKIP ]
+  [ "$(step_status nix)" = SKIP ]
 }
 
 @test "sourcing the daemon profile is skipped once nix is on PATH" {
   fake_nix_present
   plan owner/repo
-  [ "$(phase_status nix-profile)" = SKIP ]
+  [ "$(step_status nix-profile)" = SKIP ]
 }
 
 @test "sourcing the daemon profile still runs when Nix is installed but absent from this shell" {
   fake_nix_present
   rm -f "$FAKE_BIN/nix"
   plan owner/repo
-  [ "$(phase_status nix)" = SKIP ]
-  [ "$(phase_status nix-profile)" = RUN ]
+  [ "$(step_status nix)" = SKIP ]
+  [ "$(step_status nix-profile)" = RUN ]
 }
 
 @test "GitHub sign-in is not probed while Nix is missing" {
   plan owner/repo
-  [ "$(phase_status github-auth)" = RUN ]
+  [ "$(step_status github-auth)" = RUN ]
   run grep -q '^gh ' "$FAKE_LOG"
   [ "$status" -ne 0 ]
 }
@@ -176,14 +176,14 @@ handoff" ]
   fake_nix_present
   fake_gh_authenticated
   plan owner/repo
-  [ "$(phase_status github-auth)" = SKIP ]
+  [ "$(step_status github-auth)" = SKIP ]
 }
 
 @test "GitHub sign-in runs when gh reports no account" {
   fake_nix_present
   fake_gh_signed_out
   plan owner/repo
-  [ "$(phase_status github-auth)" = RUN ]
+  [ "$(step_status github-auth)" = RUN ]
 }
 
 @test "the credential helper is skipped once git is configured to use gh" {
@@ -191,36 +191,36 @@ handoff" ]
   fake_gh_authenticated
   fake git 'case "$*" in *credential*) echo "!gh auth git-credential" ;; *) exit 1 ;; esac'
   plan owner/repo
-  [ "$(phase_status git-credentials)" = SKIP ]
+  [ "$(step_status git-credentials)" = SKIP ]
 }
 
-@test "the SSH key phase runs when a key exists but GitHub does not know it" {
+@test "the SSH key step runs when a key exists but GitHub does not know it" {
   fake_nix_present
   fake_gh_authenticated
   mkdir -p "$HOME/.ssh"
   printf 'ssh-ed25519 AAAA test\n' > "$HOME/.ssh/id_ed25519.pub"
   fake ssh-keygen 'echo "256 SHA256:deadbeef test (ED25519)"'
   plan owner/repo
-  [ "$(phase_status ssh-key)" = RUN ]
+  [ "$(step_status ssh-key)" = RUN ]
 }
 
-@test "the SSH key phase is skipped once the key is registered with GitHub" {
+@test "the SSH key step is skipped once the key is registered with GitHub" {
   everything_installed
   plan owner/repo
-  [ "$(phase_status ssh-key)" = SKIP ]
+  [ "$(step_status ssh-key)" = SKIP ]
 }
 
 @test "the clone is skipped when the destination is already a git repository" {
   mkdir -p "$HOME/repo/.git"
   plan owner/repo
-  [ "$(phase_status clone)" = SKIP ]
+  [ "$(step_status clone)" = SKIP ]
 }
 
 @test "the handoff is never skipped" {
   everything_installed
   bootstrapped_clone repo
   plan owner/repo
-  [ "$(phase_status handoff)" = RUN ]
+  [ "$(step_status handoff)" = RUN ]
 }
 
 @test "an already-bootstrapped machine skips everything but the handoff" {
@@ -236,13 +236,13 @@ handoff" ]
 
 @test "choosing is skipped when the repository was named on the command line" {
   plan owner/repo
-  [ "$(phase_status choose-repository)" = SKIP ]
+  [ "$(step_status choose-repository)" = SKIP ]
   [[ "$output" == *"owner/repo was named on the command line"* ]]
 }
 
 @test "choosing runs when no repository was named" {
   plan
-  [ "$(phase_status choose-repository)" = RUN ]
+  [ "$(step_status choose-repository)" = RUN ]
   [[ "$output" == *"list the repositories on your GitHub account"* ]]
 }
 
@@ -305,17 +305,17 @@ handoff" ]
   [ "$status" -eq 0 ]
 }
 
-@test "a dry run with Nix but no gh reports the gh phases rather than fetching one" {
+@test "a dry run with Nix but no gh reports the gh steps rather than fetching one" {
   fake_nix_present
   rm -f "$FAKE_BIN/gh"
   plan owner/repo
-  [ "$(phase_status github-auth)" = RUN ]
-  [ "$(phase_status ssh-key)" = RUN ]
+  [ "$(step_status github-auth)" = RUN ]
+  [ "$(step_status ssh-key)" = RUN ]
   run grep -q '^nix ' "$FAKE_LOG"
   [ "$status" -ne 0 ]
 }
 
-@test "a failure names the phase and says a re-run is safe" {
+@test "a failure names the step and says a re-run is safe" {
   # The error trap must be reachable from inside an action, which needs
   # errtrace: without it a failing action exits silently.
   run grep -qE '^set -E' "$BOOTSTRAP"
