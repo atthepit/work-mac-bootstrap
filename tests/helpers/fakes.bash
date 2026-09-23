@@ -21,8 +21,8 @@ sandbox() {
 
   export HOME="$SANDBOX/home"
   # This PATH deliberately excludes /usr/local/bin and /opt/homebrew/bin, so
-  # the wizard's `#!/usr/bin/env bash` resolves to /bin/bash. On macOS that is
-  # bash 3.2, which is what a new Mac ships and what the wizard must survive.
+  # the pre-bootstrap's `#!/usr/bin/env bash` resolves to /bin/bash. On macOS that is
+  # bash 3.2, which is what a new Mac ships and what the pre-bootstrap must survive.
   export PATH="$FAKE_BIN:/usr/bin:/bin:/usr/sbin:/sbin"
   export FAKE_LOG
   # A path that does not exist, so Nix reads as not installed by default.
@@ -128,7 +128,7 @@ everything_installed() {
 }
 
 # bootstrapped_clone NAME puts a clone at $HOME/NAME that already provides the
-# bootstrap.sh this wizard hands over to.
+# bootstrap.sh this pre-bootstrap hands over to.
 bootstrapped_clone() {
   mkdir -p "$HOME/$1/.git"
   printf '#!/usr/bin/env bash\n' > "$HOME/$1/bootstrap.sh"
@@ -140,12 +140,12 @@ plan() {
   run "$BOOTSTRAP" --dry-run "$@"
 }
 
-# plan_ids prints the phase identifiers, in the order the plan lists them.
+# plan_ids prints the step identifiers, in the order the plan lists them.
 plan_ids() {
   printf '%s\n' "$output" | sed -n 's/^ *\[ *[0-9]*\] \([a-z-]*\) .*/\1/p'
 }
 
-# phase_status ID prints RUN or SKIP for that phase.
-phase_status() {
+# step_status ID prints RUN or SKIP for that step.
+step_status() {
   printf '%s\n' "$output" | sed -n "s/^ *\[ *[0-9]*\] $1  *\([A-Z]*\).*/\1/p"
 }

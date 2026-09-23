@@ -28,8 +28,7 @@ curl -fsSL https://raw.githubusercontent.com/atthepit/work-mac-bootstrap/v1/boot
   | bash -s -- --dry-run owner/repo
 ```
 
-Leave the slug off and the pre-bootstrap lists the repositories on your GitHub
-account once you have signed in, and asks which one to clone:
+Leave the slug off and you are asked which repository to clone instead:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/atthepit/work-mac-bootstrap/v1/bootstrap.sh \
@@ -51,7 +50,8 @@ machine without it they report as needed rather than claiming to know.
 The `owner/repo` slug is the only argument, and there is at most one of it.
 
 - Given, it is the repository to clone. Omitted, you are asked to choose one
-  after the GitHub sign-in.
+  after the GitHub sign-in — after, because listing your repositories needs
+  it, and nothing before the clone needs to know which one you meant.
 - The clone lands in `$HOME/<repo>` — the repository half of the slug, not the
   owner half.
 - The repository may be private. Cloning it is what the GitHub sign-in is for.
@@ -72,8 +72,11 @@ its own root.
 That file is the entire contract between the two halves:
 
 > A configuration repository is bootstrappable by this pre-bootstrap if it
-> provides an executable `bootstrap.sh` at its root that can be run with no
-> arguments.
+> provides a `bootstrap.sh` at its root that can be run with no arguments.
+
+Executable is not part of it: an executable `bootstrap.sh` is `exec`d
+directly, and one that is not gets `exec /bin/bash bootstrap.sh`, because a
+missing `chmod +x` is not a reason to refuse a machine.
 
 `exec` rather than a call, so what takes over is the only thing left running
 and owns the terminal, the exit status and any prompt it needs to make.
@@ -104,10 +107,6 @@ fixed by hand outside the run.
 | `clone` | The destination is already a git repository | Clones the repository |
 | `handoff` | Never | `exec`s `bootstrap.sh` from the clone root |
 
-The picker sits where it does because listing repositories needs the GitHub
-sign-in, and nothing before the clone needs to know which repository you
-meant.
-
 Two properties worth stating plainly, because they are the reason to trust the
 command with sudo:
 
@@ -121,7 +120,8 @@ command with sudo:
 
 ## Tests
 
-The plan is the contract, so the tests assert on it: step order, the guard
+The plan — what `--dry-run` prints — is the contract, so the tests assert
+on it: step order, the guard
 each step consults, and how each guard reads on a fresh machine, a
 partly-configured one, and one that has already been through this.
 
@@ -152,6 +152,13 @@ property cannot quietly lapse.
 every script the skill generates, which is the point of it. The steps below
 the marker are this one's own. A few of the library's helpers go unused here;
 leave them be rather than trimming the library out of step with the skill.
+
+Two of those unused helpers are why the step machinery is spelled as it is.
+The library counts in *stages* — `TOTAL_STAGES`, `stage()` — and this project
+calls that unit a step, so `TOTAL_STEPS` and `heading()` below the marker do
+that job instead. The declaring function is `run_step` rather than `step`
+because the library already has a `step()`, and shadowing it would make it
+provably dead code that the lint then fails over.
 
 ## Licence
 
