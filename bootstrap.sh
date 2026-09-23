@@ -252,7 +252,7 @@ Options:
 
 Typical use, pinned to a release tag:
 
-  curl -fsSL https://raw.githubusercontent.com/atthepit/work-mac-bootstrap/v1/bootstrap.sh \\
+  curl -fsSL https://raw.githubusercontent.com/atthepit/work-mac-bootstrap/v2/bootstrap.sh \\
     | bash -s -- owner/repo
 USAGE
 }

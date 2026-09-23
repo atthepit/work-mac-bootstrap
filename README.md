@@ -11,7 +11,7 @@ repository to clone as its only argument — or asks you which one, from a list
 ## Use it
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/atthepit/work-mac-bootstrap/v1/bootstrap.sh \
+curl -fsSL https://raw.githubusercontent.com/atthepit/work-mac-bootstrap/v2/bootstrap.sh \
   | bash -s -- owner/repo
 ```
 
@@ -19,19 +19,19 @@ curl -fsSL https://raw.githubusercontent.com/atthepit/work-mac-bootstrap/v1/boot
 you, with sudo, so an unfinished commit on `main` must not be able to. A tag
 is moved deliberately or not at all; a branch moves whenever anyone pushes.
 That is the whole of the policy, and it is why every command documented here
-names `v1` rather than `main`.
+names `v2` rather than `main`.
 
 See the plan without running any of it:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/atthepit/work-mac-bootstrap/v1/bootstrap.sh \
+curl -fsSL https://raw.githubusercontent.com/atthepit/work-mac-bootstrap/v2/bootstrap.sh \
   | bash -s -- --dry-run owner/repo
 ```
 
 Leave the slug off and you are asked which repository to clone instead:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/atthepit/work-mac-bootstrap/v1/bootstrap.sh \
+curl -fsSL https://raw.githubusercontent.com/atthepit/work-mac-bootstrap/v2/bootstrap.sh \
   | bash -s
 ```
 
